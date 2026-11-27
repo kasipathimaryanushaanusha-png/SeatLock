@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SeatLock - Seat Booking</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f1f5f9;
+      padding: 30px;
+      text-align: center;
+    }
+
+    h1 {
+      color: #1e293b;
+    }
+
+    .seats {
+      display: grid;
+      grid-template-columns: repeat(5, 65px);
+      gap: 12px;
+      justify-content: center;
+      margin: 30px auto;
+    }
+
+    button {
+      padding: 15px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      background: #22c55e;
+      color: white;
+      font-weight: bold;
+    }
+
+    button:disabled {
+      background: #ef4444;
+      cursor: not-allowed;
+    }
+
+    #message {
+      margin-top: 20px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>SeatLock</h1>
+  <p>Select a seat to begin booking.</p>
+
+  <div class="seats" id="seats"></div>
+  <p id="message"></p>
+
+  <script>
+    const seatsContainer = document.getElementById("seats");
+    const message = document.getElementById("message");
+
+    async function loadSeats() {
+      const response = await fetch("/seats");
+      const seats = await response.json();
+
+      seatsContainer.innerHTML = "";
+
+      seats.forEach(seat => {
+        const button = document.createElement("button");
+        button.textContent = seat.label;
+        button.disabled = seat.status !== "available";
+        button.onclick = () => holdSeat(seat.id);
+        seatsContainer.appendChild(button);
+      });
+    }
+
+    async function holdSeat(seatId) {
+      const response = await fetch("/holds", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Id": "demo-user",
+          "Idempotency-Key": crypto.randomUUID()
+        },
+        body: JSON.stringify({ seatId })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        message.textContent = result.error;
+        return;
+      }
+
+      message.textContent = "Seat held! Hold ID: " + result.holdId;
+      await loadSeats();
+    }
+
+    loadSeats();
+  </script>
+</body>
+</html>

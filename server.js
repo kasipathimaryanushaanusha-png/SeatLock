@@ -68,7 +68,10 @@ if (seatCount === 0) {
 
   createSeats();
 }
-
+// PAGE: serve index.html without sign-in
+app.get("/",(req, res) => {
+res.sendFile(__dirname + "/index.html");
+})
 // 2. DEMO IDENTITY
 // Replace this with real login/session authentication
 // before allowing public users to access the system.
@@ -382,3 +385,83 @@ app.delete("/holds/:holdId", (req, res) => {
 app.listen(3000, () => {
   console.log("SeatLock is running at http://localhost:3000");
 });
+// 8. MODIFY A HOLD: move my own active hold to another seat.
+app.patch("/holds/:holdId", (req, res) => {
+  const key = requireRequestKey(req, res);
+  if (!key) return;
+
+  const userId = req.userId;
+  const holdId = req.params.holdId;
+  const { seatId } = req.body;
+
+  if (!Number.isInteger(seatId)) {
+    return res.status(400).json({ error: "seatId must be a number." });
+  }
+
+  const modifyHold = db.transaction(() => {
+    // A retried request gets the saved answer, so nothing happens twice.
+    const previous = getSavedRequest(userId, key, "modify");
+    if (previous) {
+      return JSON.parse(previous.response);
+    }
+
+    // Only the owner can modify: id AND user must both match.
+    const hold = db.prepare(`
+      SELECT * FROM holds
+      WHERE id = ? AND user_id = ?
+    `).get(holdId, userId);
+
+    if (!hold) {
+      return { error: "Hold not found.", status: 404 };
+    }
+
+    if (hold.status !== "active" || hold.expires_at <= Date.now()) {
+      return { error: "Hold is no longer active.", status: 409 };
+    }
+
+    // Only seats that exist can be held.
+    const seat = db.prepare("SELECT id FROM seats WHERE id = ?").get(seatId);
+    if (!seat) {
+      return { error: "Seat does not exist.", status: 404 };
+    }
+
+    // The new seat must not be booked or held by someone else.
+    const booked = db.prepare(
+      "SELECT 1 FROM bookings WHERE seat_id = ?"
+    ).get(seatId);
+
+    const held = db.prepare(`
+      SELECT 1 FROM holds
+      WHERE seat_id = ? AND status = 'active'
+      AND expires_at > ? AND id != ?
+    `).get(seatId, Date.now(), holdId);
+
+    if (booked || held) {
+      return { error: "Seat is no longer available.", status: 409 };
+    }
+
+    db.prepare(`
+      UPDATE holds SET seat_id = ?
+      WHERE id = ? AND user_id = ?
+    `).run(seatId, holdId, userId);
+
+    const response = { holdId, seatId };
+    saveRequest(userId, key, "modify", response);
+    return response;
+  });
+
+  try {
+    const result = modifyHold.immediate();
+
+    if (result.error) {
+      return res.status(result.status).json(result);
+    }
+
+    res.json(result);
+  } catch (error) {
+    res.status(409).json({ error: "Hold could not be modified." });
+  }
+});
+
+
+

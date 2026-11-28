@@ -51,14 +51,18 @@
 
   <div class="seats" id="seats"></div>
   <p id="message"></p>
-
-  <script>
+<button onclick="confirmHold()">Confirm my seat</button> <button onclick="releaseHold()">Release my seat</button>
+<script>
+  let currentHoldId = null;
+  // This page remembers only MY hold, so Confirm, Release and Change act on my own seat.
+// Each request carries an Idempotency-Key so the server can ignore repeated copies.
+// The server checks that a hold belongs to this user before changing it.
     const seatsContainer = document.getElementById("seats");
     const message = document.getElementById("message");
 
     async function loadSeats() {
-      const response = await fetch("/seats");
-      const seats = await response.json();
+const response = await fetch("/seats", { headers: { "X-User-Id": "demo-user" } });
+    const seats = await response.json();
 
       seatsContainer.innerHTML = "";
 
@@ -66,7 +70,8 @@
         const button = document.createElement("button");
         button.textContent = seat.label;
         button.disabled = seat.status !== "available";
-        button.onclick = () => holdSeat(seat.id);
+
+       button.onclick = () => currentHoldId ? changeSeat(seat.id) : holdSeat(seat.id);
         seatsContainer.appendChild(button);
       });
     }
@@ -90,9 +95,71 @@
       }
 
       message.textContent = "Seat held! Hold ID: " + result.holdId;
+      currentHoldId = result.holdId;
       await loadSeats();
     }
+async function confirmHold() {
+  if (!currentHoldId) {
+    message.textContent = "Pick a seat first.";
+    return;
+  }
+  const response = await fetch("/holds/" + currentHoldId + "/confirm", {
+    method: "POST",
+    headers: {
+      "X-User-Id": "demo-user",
+      "Idempotency-Key": crypto.randomUUID()
+    }
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    message.textContent = result.error;
+    return;
+  }
+  message.textContent = "Seat confirmed!";
+  currentHoldId = null;
+  await loadSeats();
+}
+async function releaseHold() {
+  if (!currentHoldId) {
+    message.textContent = "Pick a seat first.";
+    return;
+  }
+  const response = await fetch("/holds/" + currentHoldId, {
+    method: "DELETE",
+    headers: {
+      "X-User-Id": "demo-user",
+      "Idempotency-Key": crypto.randomUUID()
+    }
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    message.textContent = result.error;
+    return;
+  }
+  message.textContent = "Seat released.";
+  currentHoldId = null;
+  await loadSeats();
+}
 
+
+async function changeSeat(seatId) {
+  const response = await fetch("/holds/" + currentHoldId, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User-Id": "demo-user",
+      "Idempotency-Key": crypto.randomUUID()
+    },
+    body: JSON.stringify({ seatId })
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    message.textContent = result.error;
+    return;
+  }
+  message.textContent = "Seat changed to seat " + result.seatId;
+  await loadSeats();
+}
     loadSeats();
   </script>
 </body>

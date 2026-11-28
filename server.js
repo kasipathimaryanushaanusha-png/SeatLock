@@ -4,7 +4,7 @@ const Database = require("better-sqlite3");
 const { randomUUID } = require("crypto");
 
 const app = express();
-const db = new Database("seatlock.db");
+const db = new Database("/tmp/seats.db");
 
 app.use(express.json());
 
